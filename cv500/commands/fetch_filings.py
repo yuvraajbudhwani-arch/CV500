@@ -168,18 +168,55 @@ def _concall_score(c: Candidate) -> int:
 
 # --- discovery (bounded BFS over the company site) --------------------------
 
+# Common Indian IR sub-paths to seed the crawl with, so we reach the annual-report
+# and transcript listings directly instead of relying on homepage links alone.
+# Most are gracefully 404 on any given site; the few that resolve are high-value.
+_SEED_PATHS = (
+    "investors", "investor", "investor-relations", "investors-relations",
+    "investor-relation", "investors/financial-results", "investors/financials",
+    "investors/annual-reports", "investors/annual-report", "investor-relations/annual-reports",
+    "investor-relations/financial-results", "annual-reports", "annual-report",
+    "financial-results", "financials", "investors/reports", "investors/reports-and-filings",
+    "investors/quarterly-results", "investors/earnings-call-transcripts",
+    "investors/concall-transcripts", "investors/investor-presentations",
+    "investors/results", "investor-relations/financial-reports",
+    "investors/financial-reports", "investors/disclosures",
+)
+
+# Strong document-section signals -> crawl these links first (priority frontier).
+_PRIORITY_LINK_HINTS = (
+    "annual report", "annual-report", "annualreport", "transcript", "concall",
+    "con-call", "earnings call", "earnings-call", "financial result",
+    "financial-result", "quarterly result", "investor", "financials", "financial report",
+)
+
+
+def _seed_urls(start_url: str) -> List[str]:
+    parsed = urlparse(start_url)
+    base = f"{parsed.scheme}://{parsed.netloc}"
+    return [f"{base}/{p}" for p in _SEED_PATHS]
+
+
 def discover_candidates(crawler: Crawler, start_url: str) -> List[Candidate]:
-    """Bounded BFS from the homepage, collecting PDF candidates and following only
-    IR/document links on the same registered domain."""
+    """Bounded BFS from the homepage + seeded IR paths, collecting PDF candidates and
+    following only IR/document links on the same registered domain. Links that look
+    like document sections (annual reports / transcripts) are crawled first."""
+    from collections import deque
+
     visited: set = set()
-    frontier: List[Tuple[str, int]] = [(start_url, 0)]
+    # (url, depth). Homepage first, then seeded IR paths at depth 1.
+    frontier: "deque[Tuple[str, int]]" = deque()
+    frontier.append((start_url, 0))
+    for s in _seed_urls(start_url):
+        frontier.append((s, 1))
+
     candidates: List[Candidate] = []
     seen_pdf: set = set()
     pages = 0
 
     while frontier and pages < MAX_PAGES:
-        url, depth = frontier.pop(0)
-        norm = url.split("#")[0]
+        url, depth = frontier.popleft()
+        norm = url.split("#")[0].rstrip("/")
         if norm in visited:
             continue
         visited.add(norm)
@@ -192,7 +229,9 @@ def discover_candidates(crawler: Crawler, start_url: str) -> List[Candidate]:
         if (not html) and res.ok is False and res.reason in ("site error",):
             pass  # leave; counted as a failed page
         if html is None:
-            print(f"  [skip] {res.reason}: {url}")
+            # Seeded paths that don't exist are expected; only report blocks/errors.
+            if res.reason != "not found":
+                print(f"  [skip] {res.reason}: {url}")
             continue
 
         soup = BeautifulSoup(html, "lxml")
@@ -206,6 +245,7 @@ def discover_candidates(crawler: Crawler, start_url: str) -> List[Candidate]:
                 anchors = soup.find_all("a", href=True)
                 print(f"  [render] used Playwright for {url} ({len(anchors)} links)")
 
+        priority_q: List[Tuple[str, int]] = []
         for a in anchors:
             href = a.get("href", "").strip()
             if not href or href.startswith(("mailto:", "tel:", "javascript:")):
@@ -226,10 +266,21 @@ def discover_candidates(crawler: Crawler, start_url: str) -> List[Candidate]:
 
             # Follow deeper only on-site, within depth, and only IR/doc-ish links.
             if depth < MAX_DEPTH and _same_site(start_url, absu):
+                blob = f"{link_text} {href}".lower()
                 if _looks_like_ir(link_text) or _looks_like_ir(href):
-                    nxt = absu.split("#")[0]
-                    if nxt not in visited:
-                        frontier.append((absu, depth + 1))
+                    nxt = absu.split("#")[0].rstrip("/")
+                    if nxt not in visited and not any(d == nxt for d, _ in frontier):
+                        # Document-section links go to the front (but FIFO among
+                        # themselves) so we reach AR/transcript listings early without
+                        # starving breadth; generic IR links queue behind them.
+                        if any(h in blob for h in _PRIORITY_LINK_HINTS):
+                            priority_q.append((absu, depth + 1))
+                        else:
+                            frontier.append((absu, depth + 1))
+
+        # Drain priority links to the front of the frontier for the next iterations.
+        while priority_q:
+            frontier.appendleft(priority_q.pop())
 
     print(f"  discovered {len(candidates)} PDF candidate link(s) across {pages} page(s)")
     return candidates

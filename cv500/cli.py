@@ -65,6 +65,8 @@ def _add_liquidity(sub):
 def _add_p2_5(sub):
     p = sub.add_parser("p2-5", help="Locked reverse-DCF triage: implied 10-yr revenue CAGR + verdict (Rule 3.3)")
     p.add_argument("--ev", type=float, help="Current enterprise value (EV)")
+    p.add_argument("--revenue", type=float,
+                   help="Current (base-year) revenue R0 — needed to scale FCFF to EV")
     p.add_argument("--ebit-margin-series",
                    help="Comma-separated 5-yr EBIT-margin series (fractions or %), median is taken")
     p.add_argument("--ebit-margin-csv", help="CSV with an ebit_margin column (alternative to --ebit-margin-series)")
@@ -88,6 +90,9 @@ def _add_screen_ingest(sub):
 def _add_monthly_scan(sub):
     p = sub.add_parser("monthly-scan", help="Part 08 monthly monitoring sweep across held names")
     p.add_argument("--tickers", help="Comma-separated tickers, or @file with one per line")
+    p.add_argument("--price-dir",
+                   help="Folder of <ticker>.csv (columns date,close,delivered_qty/_value) "
+                        "to compute the price-volume anomaly deterministically")
     p.add_argument("--out", default="./outputs", help="Working/output directory")
     p.set_defaults(_module="cv500.commands.monthly_scan")
 
