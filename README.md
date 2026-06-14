@@ -34,6 +34,10 @@ This installs the `cv500` CLI and four light runtime dependencies: `requests`,
 `beautifulsoup4`, `lxml`, `pypdf`. (Numerics — percentiles, the reverse-DCF solver —
 are pure-Python; no numpy/scipy/pandas.)
 
+> If your shell reports `cv500: command not found` after install, pip's scripts
+> directory isn't on your `PATH`. Either add it, or just run the CLI as a module —
+> `python -m cv500.cli <command> ...` — which is equivalent everywhere in this README.
+
 ### Optional: JavaScript-rendered IR pages (Playwright)
 
 Most sites work with static fetching. For a few JavaScript-heavy IR pages, `fetch-filings`
