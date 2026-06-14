@@ -145,7 +145,25 @@ def main(argv=None) -> int:
     try:
         module = importlib.import_module(args._module)
     except ModuleNotFoundError as exc:
-        print(f"[error] command '{args.command}' is not available yet: {exc}", file=sys.stderr)
+        missing = exc.name or ""
+        if missing == args._module:
+            # The command's own module is genuinely not present.
+            print(f"[error] command '{args.command}' is not available: {exc}", file=sys.stderr)
+        else:
+            # A third-party dependency is missing from THIS interpreter — the usual
+            # cause is running cv500 with a different Python than it was installed into.
+            print(
+                f"[error] command '{args.command}' needs a dependency that is not installed "
+                f"in this Python: missing module '{missing}'.\n"
+                f"        Fix: from the project root, install the toolkit (and its deps) into\n"
+                f"        the SAME python you run it with:\n"
+                f"            python -m pip install -e .\n"
+                f"        then run e.g.:\n"
+                f"            python -m cv500.cli {args.command} --help\n"
+                f"        (tip: `python -c \"import sys; print(sys.executable)\"` shows which "
+                f"Python you are using.)",
+                file=sys.stderr,
+            )
         return 2
 
     return module.run(args)
