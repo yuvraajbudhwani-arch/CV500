@@ -193,14 +193,6 @@ def parse_fiscal_year(text: Optional[str]) -> Optional[int]:
 # Quarter parsing
 # ---------------------------------------------------------------------------
 
-# "Q1FY25", "Q1 FY2025", "Q3 FY24", "Q1 F.Y. 25"
-_QFY_RE = re.compile(
-    r"Q\s*([1-4])\s*[,\-]?\s*F\.?\s*Y\.?\s*'?\s*(\d{2,4})(?!\d)", re.IGNORECASE
-)
-# Reverse order "FY25 Q1"
-_FYQ_RE = re.compile(
-    r"F\.?\s*Y\.?\s*'?\s*(\d{2,4})\s*[,\-]?\s*Q\s*([1-4])(?!\d)", re.IGNORECASE
-)
 # Month range "Apr-Jun 2024", "Jan - Mar 2024"
 _MONTH_RANGE_RE = re.compile(
     r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s*"
@@ -213,30 +205,27 @@ _MONTH_SINGLE_RE = re.compile(
     r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s*'?\s*(19\d{2}|20\d{2})",
     re.IGNORECASE,
 )
+# A standalone quarter number "Q1".."Q4" (not preceded by a letter, so "FAQ1" is ignored).
+_Q_NUM_RE = re.compile(r"(?<![A-Za-z])Q\s*([1-4])(?![0-9])", re.IGNORECASE)
 
 
 def parse_quarter(text: Optional[str]) -> Optional[QuarterRef]:
     """Extract a (fiscal_year, quarter) from arbitrary label text, or None.
 
-    Handles Q#FY## forms and month-based forms. For a month or month-range, the
-    *first* month determines the quarter and the printed year is the calendar year
-    of that month (converted to fiscal year).
+    Handles Q#FY## forms and month-based forms. The fiscal year is resolved with the
+    range-aware parse_fiscal_year, so "Q3 FY2025-26" correctly yields FY2026 (not 2025).
+    For a month or month-range, the *first* month determines the quarter and the printed
+    year is the calendar year of that month (converted to fiscal year).
     """
     if not text:
         return None
 
-    # 1) Q#-FY# in either order.
-    m = _QFY_RE.search(text)
-    if m:
-        q = int(m.group(1))
-        fy = _widen_year(m.group(2))
-        if fy is not None:
-            return QuarterRef(fiscal_year=fy, quarter=q)
-
-    m = _FYQ_RE.search(text)
-    if m:
-        fy = _widen_year(m.group(1))
-        q = int(m.group(2))
+    # 1) An explicit quarter number plus a fiscal year anywhere in the text. Using the
+    #    range-aware parse_fiscal_year here is what fixes "fy2025-26" -> FY2026.
+    qm = _Q_NUM_RE.search(text)
+    if qm:
+        q = int(qm.group(1))
+        fy = parse_fiscal_year(text)
         if fy is not None:
             return QuarterRef(fiscal_year=fy, quarter=q)
 

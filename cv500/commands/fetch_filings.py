@@ -54,12 +54,24 @@ _IR_KEYWORDS = (
     "quarterly", "results", "presentations", "concall", "con-call", "transcript",
     "earnings", "filing", "filings", "archive", "older",
 )
-# Keywords that mark a link as an annual report.
-_AR_HINTS = ("annual report", "annual-report", "annualreport", "ar-", "ar_",
-             "annual_report", "integrated report", "integrated-report")
-# Keywords that mark a link as a concall transcript (NOT audio / NOT a presentation).
-_TRANSCRIPT_HINTS = ("transcript", "concall", "con-call", "conference call",
-                     "conference-call", "earnings call", "earnings-call")
+# Annual-report signal. Matched as a regex (case-insensitive) so a token like "ar_fy"
+# is anchored on a separator — this avoids the classic false positive where the bare
+# substring "ar-" matches inside words like "utt[ar-]pradesh". The "ar"/"ar fy" token
+# must be preceded by start-of-string or a separator.
+_AR_RE = re.compile(
+    r"annual[\s_-]*report|integrated[\s_-]*(?:annual[\s_-]*)?report"
+    r"|(?:^|[\s_/\\-])ar[\s_-]*(?:fy|20\d\d)",
+    re.IGNORECASE,
+)
+# Concall-transcript signal (the document, not audio, not a presentation).
+_TRANSCRIPT_RE = re.compile(
+    r"transcript|con[\s_-]*call|conference[\s_-]*call|earnings[\s_-]*call|analyst[\s_-]*call",
+    re.IGNORECASE,
+)
+# Audio / recording / presentation signals — these are NOT transcripts and must never
+# be kept in a transcript slot.
+_AUDIO_RE = re.compile(r"audio|recording|webcast|\.mp3|\.wav", re.IGNORECASE)
+_PRESENTATION_RE = re.compile(r"presentation|\bppt\b|investor[\s_-]*deck", re.IGNORECASE)
 
 
 @dataclass
@@ -112,26 +124,28 @@ def _link_context(a_tag) -> str:
 
 
 def classify(c: Candidate) -> None:
-    """Set doc_type, fiscal_year and quarter on a candidate from its text/url."""
+    """Set doc_type, fiscal_year and quarter on a candidate from its text/url.
+
+    A transcript signal only classifies as a concall when it is NOT an audio/recording
+    link. An AR signal requires the anchored _AR_RE so generic substrings inside words
+    do not produce false annual reports.
+    """
     blob = c.blob
     q = parse_quarter(c.link_text) or parse_quarter(c.context) or parse_quarter(c.url)
     fy = parse_fiscal_year(c.link_text) or parse_fiscal_year(c.context) or parse_fiscal_year(c.url)
 
-    is_transcript = any(h in blob for h in _TRANSCRIPT_HINTS)
-    is_ar = any(h in blob for h in _AR_HINTS)
+    has_transcript = bool(_TRANSCRIPT_RE.search(blob))
+    is_audio = bool(_AUDIO_RE.search(blob)) and "transcript" not in blob
+    is_transcript = has_transcript and not is_audio
+    is_ar = bool(_AR_RE.search(blob))
 
-    if is_transcript and q is not None:
-        c.doc_type = "concall"
-        c.quarter = q
-        c.fiscal_year = q.fiscal_year
-    elif is_ar:
-        c.doc_type = "AR"
-        c.fiscal_year = fy
-    elif is_transcript:
-        # transcript without a clean quarter — keep but mark; year if any
+    if is_transcript:
         c.doc_type = "concall"
         c.quarter = q
         c.fiscal_year = (q.fiscal_year if q else fy)
+    elif is_ar:
+        c.doc_type = "AR"
+        c.fiscal_year = fy
     else:
         c.doc_type = "unknown"
         c.fiscal_year = fy
@@ -141,12 +155,16 @@ def classify(c: Candidate) -> None:
 def _ar_score(c: Candidate) -> int:
     s = 0
     b = c.blob
-    if any(h in b for h in _AR_HINTS):
+    if _AR_RE.search(b):
         s += 5
+    if "annual report" in b or "annual-report" in b:
+        s += 3   # the spelled-out phrase is the strongest signal
     if c.source_site == "company":
         s += 2
-    if "xbrl" in b or "notice" in b or "agm" in b:
+    if "xbrl" in b or "notice" in b or ("agm" in b and "annual report" not in b):
         s -= 3   # AGM notices / XBRL are not the report itself
+    if _AUDIO_RE.search(b):
+        s -= 5
     return s
 
 
@@ -155,13 +173,13 @@ def _concall_score(c: Candidate) -> int:
     b = c.blob
     if "transcript" in b:
         s += 6       # strongly prefer the transcript over audio/ppt
-    if any(h in b for h in ("concall", "conference call", "earnings call")):
+    if _TRANSCRIPT_RE.search(b):
         s += 3
     if c.source_site == "company":
         s += 2
-    if "audio" in b or "recording" in b or ".mp3" in b:
-        s -= 5
-    if "presentation" in b or "ppt" in b or "investor presentation" in b:
+    if _AUDIO_RE.search(b):
+        s -= 8       # audio recording / webcast is not a transcript
+    if _PRESENTATION_RE.search(b):
         s -= 4
     return s
 
@@ -492,11 +510,35 @@ def _fill_slot(crawler, cands, *, expected_kind, expected_fy, expected_q, name,
         if not v.is_pdf:
             reason = "site error"
             continue
-        # Reject only if it clearly is the OTHER kind of document.
-        wrong_kind = (v.kind != pdfval.KIND_UNKNOWN and v.kind != expected_kind)
-        if wrong_kind:
+        blob = c.blob
+
+        # (a) Reject if the content clearly is the OTHER kind of document.
+        if v.kind != pdfval.KIND_UNKNOWN and v.kind != expected_kind:
             reason = "not found"
             continue
+        # (b) Reject if the document's OWN stated period contradicts this slot — this is
+        #     what stops a stale/wrong-year file landing in the wrong cell.
+        if (expected_fy is not None and v.stated_fiscal_year is not None
+                and v.stated_fiscal_year != expected_fy):
+            reason = "not found"
+            continue
+        if (expected_q is not None and v.stated_quarter is not None
+                and v.stated_quarter != expected_q):
+            reason = "not found"
+            continue
+        # (c) When content cues are inconclusive (UNKNOWN — e.g. scanned/image PDF, or a
+        #     cover-letter intimation), keep ONLY if the source link itself strongly
+        #     signals the expected document. This rejects mislabelled junk such as a
+        #     regulatory "intimation order" or an audio-recording notice.
+        if v.kind == pdfval.KIND_UNKNOWN:
+            if expected_kind == pdfval.KIND_AR:
+                strong = bool(_AR_RE.search(blob)) and not _AUDIO_RE.search(blob)
+            else:
+                strong = ("transcript" in blob) and not _AUDIO_RE.search(blob)
+            if not strong:
+                reason = "not found"
+                continue
+
         content_hashes.add(digest)
         zip_path = f"{zip_subdir}/{out_filename}"
         work_files[zip_path] = res.content
