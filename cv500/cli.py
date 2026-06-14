@@ -68,7 +68,7 @@ def _add_p2_5(sub):
     p.add_argument("--revenue", type=float,
                    help="Current (base-year) revenue R0 — needed to scale FCFF to EV")
     p.add_argument("--ebit-margin-series",
-                   help="Comma-separated 5-yr EBIT-margin series (fractions or %), median is taken")
+                   help="Comma-separated 5-yr EBIT-margin series (fractions or percents), median is taken")
     p.add_argument("--ebit-margin-csv", help="CSV with an ebit_margin column (alternative to --ebit-margin-series)")
     p.add_argument("--roic-norm", type=float, help="Normalised ROIC (fraction, e.g. 0.18)")
     p.add_argument("--conservative-cagr", type=float, help="Operator conservative expectation CAGR C (fraction)")
