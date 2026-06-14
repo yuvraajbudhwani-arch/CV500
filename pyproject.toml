@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cv500"
+version = "0.1.0"
+description = "Operator-side, command-line data-collection toolkit for research on Indian listed equities."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Proprietary - internal operator use" }
+authors = [{ name = "CV500 operator" }]
+keywords = ["india", "equities", "filings", "research", "data-collection"]
+
+dependencies = [
+    "requests>=2.31",
+    "beautifulsoup4>=4.12",
+    "lxml>=4.9",
+    "pypdf>=4.0",
+]
+
+[project.optional-dependencies]
+# JavaScript-rendered IR pages. The crawler works without it (degrades to MISSING).
+browser = ["playwright>=1.40"]
+# Test tooling.
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+cv500 = "cv500.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["cv500*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

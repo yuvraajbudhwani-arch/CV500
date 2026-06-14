@@ -1,0 +1,42 @@
+# --- cv500: code only in version control; never commit fetched data or outputs ---
+
+# Working / output directories produced by the tools
+outputs/
+vault_data/
+
+# Fetched artefacts (in case they land outside outputs/)
+*.zip
+*.pdf
+*.csv
+*.xlsx
+*.xls
+# ...but DO keep curated sample/fixture inputs used by tests
+!tests/**/*.csv
+!tests/**/*.xlsx
+!tests/fixtures/**
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Playwright browser downloads are global; nothing to ignore locally, but cache just in case
+.playwright/
+
+# Editor / OS cruft
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

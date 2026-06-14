@@ -1,0 +1,13 @@
+# Runtime dependencies for the cv500 toolkit.
+# Kept deliberately light. Numerics (percentiles, reverse-DCF solver) are pure-Python
+# (no numpy/scipy/pandas) so the toolkit stays portable and the math is auditable.
+
+requests>=2.31          # polite HTTP fetching
+beautifulsoup4>=4.12    # HTML parsing for IR-page discovery
+lxml>=4.9               # fast parser backend for BeautifulSoup
+pypdf>=4.0              # PDF text extraction for validation (AR / transcript detection)
+
+# Optional — only needed for JavaScript-rendered IR pages. The crawler degrades
+# gracefully (marks items MISSING) if this is not installed.
+#   pip install playwright && playwright install chromium
+# playwright>=1.40
